@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chatbot</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+    <div class="w-full max-w-lg bg-white shadow-lg rounded-lg p-6">
+        <h2 class="text-2xl font-semibold text-center mb-4">AI Chatbot</h2>
+        <div id="chatbox" class="h-80 overflow-y-auto border p-3 bg-gray-50 rounded-md"></div>
+        <div class="flex mt-4">
+            <input id="message" type="text" class="flex-grow p-2 border rounded-md focus:outline-none" placeholder="Type your message...">
+            <button onclick="sendMessage()" class="ml-2 px-4 py-2 bg-blue-500 text-white rounded-md">Send</button>
+        </div>
+    </div>
+
+    <script>
+        var socket = io.connect('http://localhost:1000');
+
+        function sendMessage() {
+            var msg = document.getElementById("message").value;
+            if (msg.trim() === "") return;
+
+            let chatbox = document.getElementById("chatbox");
+            chatbox.innerHTML += `<div class="text-right text-blue-600 mb-2">You: ${msg}</div>`;
+
+            // Create a placeholder for bot response
+            let botMessage = document.createElement("div");
+            botMessage.className = "text-left text-gray-800 mb-2";
+            botMessage.innerHTML = "Bot: ";
+            chatbox.appendChild(botMessage);
+
+            socket.emit('message', { 'message': msg });
+            document.getElementById("message").value = "";
+
+            socket.on('response', function(data) {
+                botMessage.innerHTML += data.reply;  // Append response token-by-token
+                chatbox.scrollTop = chatbox.scrollHeight;
+            });
+        }
+    </script>
+</body>
+</html>

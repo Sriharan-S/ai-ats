@@ -1,0 +1,11 @@
+Flask
+requests
+python-dotenv
+scikit-learn
+xgboost
+shap
+pandas
+numpy
+joblib
+pdfplumber
+python-docx

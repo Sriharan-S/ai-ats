@@ -1,20 +1,60 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# AIATS
 
-# Run and deploy your AI Studio app
+AIATS is split into a Python Flask backend and a TypeScript React frontend.
 
-This contains everything you need to run your app locally.
+## Structure
 
-View your app in AI Studio: https://ai.studio/apps/48f20072-7e0c-4f2d-8c0d-ab6573440b55
+```text
+backend/   Flask API, ML pipeline, resume parsing, roadmap JSON data
+frontend/  Vite + React + TypeScript user interface
+docs/      Project, frontend, API, database, and user-flow documentation
+```
 
-## Run Locally
+## Backend
 
-**Prerequisites:**  Node.js
+```powershell
+cd backend
+pip install -r requirements.txt
+python main.py
+```
 
+The Flask backend runs on:
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```text
+http://localhost:5000
+```
+
+Important APIs:
+
+- `GET /api/health`
+- `GET /api/track/github/<username>`
+- `GET /api/track/leetcode/<username>`
+- `GET /api/track/codeforces/<username>`
+- `POST /api/ats-analyze`
+- `GET /api/roadmaps`
+- `GET /api/roadmaps/<slug>`
+
+## Frontend
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite frontend runs on:
+
+```text
+http://localhost:5173
+```
+
+During development, Vite proxies `/api` to Flask on port `5000`.
+
+## Production Build
+
+```powershell
+cd frontend
+npm run build
+```
+
+After build, Flask can serve the compiled TypeScript frontend from `frontend/dist`.
