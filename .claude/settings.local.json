@@ -5,7 +5,11 @@
       "Bash(python -m pytest tests/ -v)",
       "Bash(pip install *)",
       "Bash(npm run *)",
-      "Bash(python -c \"import main; print\\('model_loaded:', main.ats_pipeline is not None\\); print\\('meta:', main.model_meta.get\\('model_version'\\), main.model_meta.get\\('feature_version'\\)\\)\")"
+      "Bash(python -c \"import main; print\\('model_loaded:', main.ats_pipeline is not None\\); print\\('meta:', main.model_meta.get\\('model_version'\\), main.model_meta.get\\('feature_version'\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(netstat -ano)",
+      "Read(//d/d/Folders/Sri/AIATS/**)",
+      "Read(//d/d/Folders/Sri/AIATS/frontend/**)"
     ]
   }
 }

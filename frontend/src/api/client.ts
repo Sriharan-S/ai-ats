@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
+if (!API_BASE) {
+  throw new Error("VITE_API_BASE_URL must be defined in frontend/.env");
+}
 
 type ApiErrorBody = {
   error?: string | { message?: string };

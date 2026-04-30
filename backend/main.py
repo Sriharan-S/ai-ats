@@ -515,8 +515,14 @@ def serve_frontend(path):
 
 if __name__ == "__main__":
     debug_enabled = os.getenv("FLASK_DEBUG", "0") == "1"
+    port_value = os.getenv("PORT")
+    if not port_value:
+        raise RuntimeError("PORT must be defined in backend/.env")
+    host_value = os.getenv("HOST")
+    if not host_value:
+        raise RuntimeError("HOST must be defined in backend/.env")
     app.run(
         debug=debug_enabled,
-        port=int(os.getenv("PORT", "5001")),
-        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(port_value),
+        host=host_value,
     )
