@@ -25,3 +25,10 @@ uploads/
 .vscode/
 .DS_Store
 Thumbs.db
+
+.angular
+.agent
+.chat
+.claude
+.opencode
+.gemini
