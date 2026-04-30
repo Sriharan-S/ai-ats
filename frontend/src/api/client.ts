@@ -32,3 +32,22 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
 
   return data as T;
 }
+
+/**
+ * Like requestJson but returns the JSON body even when the HTTP status is
+ * non-2xx. Useful for the platform track endpoints, which return 404 with
+ * a populated `{fetch_status: "not_found", ...}` body that the UI wants to
+ * render.
+ */
+export async function requestJsonAllowNonOk<T>(
+  path: string,
+  init?: RequestInit
+): Promise<{ data: T; ok: boolean; status: number }> {
+  const response = await fetch(`${API_BASE}${path}`, init);
+  const contentType = response.headers.get("content-type") ?? "";
+  const data: unknown = contentType.includes("application/json")
+    ? await response.json()
+    : await response.text();
+
+  return { data: data as T, ok: response.ok, status: response.status };
+}

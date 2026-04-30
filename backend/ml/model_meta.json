@@ -1,0 +1,53 @@
+{
+  "model_version": "ats-v2.0.0",
+  "feature_version": "features-v2.0.0",
+  "dataset_version": "synthetic-bootstrap-v2",
+  "task": "regression",
+  "feature_count": 29,
+  "feature_names": [
+    "github_total_commits",
+    "github_total_prs",
+    "github_total_repos",
+    "github_total_languages",
+    "leetcode_solved",
+    "leetcode_easy",
+    "leetcode_medium",
+    "leetcode_hard",
+    "leetcode_ranking",
+    "codeforces_rating",
+    "codeforces_max_rating",
+    "codeforces_contests",
+    "codeforces_avg_problem_rating",
+    "commit_consistency_score",
+    "problem_solving_velocity",
+    "skill_keyword_density",
+    "api_skill_validation_ratio",
+    "project_skill_overlap",
+    "leetcode_hard_ratio",
+    "leetcode_medium_ratio",
+    "resume_word_count",
+    "resume_skills_count",
+    "jd_skills_count",
+    "has_github_profile",
+    "has_leetcode_profile",
+    "has_codeforces_profile",
+    "github_fetch_failed",
+    "leetcode_fetch_failed",
+    "codeforces_fetch_failed"
+  ],
+  "sample_size": 800,
+  "target_summary": {
+    "mean": 71.0203070460961,
+    "p10": 60.57383240558028,
+    "p50": 71.12069067462593,
+    "p90": 81.41125446050245,
+    "min": 48.56457657755375,
+    "max": 96.86620385039225
+  },
+  "cv_metrics": {
+    "r2": 0.763772741762317,
+    "mae": 3.1276435731210954,
+    "rmse": 3.984251899993346
+  },
+  "trained_at": "2026-04-30T00:50:28+00:00"
+}

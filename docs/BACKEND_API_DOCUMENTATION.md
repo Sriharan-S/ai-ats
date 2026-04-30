@@ -65,15 +65,7 @@ Recommended variables:
 
 ## 5. Response Style
 
-Current endpoints return either direct JSON data or:
-
-```json
-{
-  "error": "Human-readable error"
-}
-```
-
-Recommended standard error shape:
+Endpoints that need to signal richer error context use a structured shape:
 
 ```json
 {
@@ -83,6 +75,18 @@ Recommended standard error shape:
     "details": {}
   }
 }
+```
+
+`/api/ats-analyze`, `/api/roadmaps/<slug>`, and the catch-all 404 already use
+this shape. The platform tracking endpoints (`/api/track/*`) return their
+domain payload plus a `fetch_status` field instead — they always return a
+structured body even when the upstream API failed, so the UI can render
+"User not found" / "Rate limited" / etc. distinct from the success state.
+
+`fetch_status` is one of:
+
+```text
+success | not_found | rate_limited | unauthorized | timeout | error | not_requested
 ```
 
 Recommended success wrapper for future APIs:
@@ -225,6 +229,20 @@ Current backend behavior:
 - Falls back from authenticated request to unauthenticated request.
 - Estimates commits if recent events return too few.
 
+Backend behavior (current):
+
+- `total_commits` comes from GitHub Search (`/search/commits?q=author:`),
+  capped at 1000 by GitHub itself. When the cap is hit, `total_commits_capped`
+  is `true`. **No fabricated padding** is applied if the user has few events.
+- `total_pull_requests` comes from GitHub Search (`/search/issues?q=type:pr+author:`).
+- Repositories are paginated via the `Link: rel="next"` header (up to 5 pages).
+- `language_stats` are computed from real per-repo language byte counts
+  aggregated across non-fork repos.
+- `commit_timestamps` are real PushEvent timestamps (last 90d) used by the
+  consistency-score feature.
+- All upstream calls go through `services.http_client` (retry, backoff,
+  classification of 404 / 429 / 403-rate-limit / timeout).
+
 Success response:
 
 ```json
@@ -239,41 +257,19 @@ Success response:
     "JavaScript": 39.5
   },
   "commit_timestamps": ["2026-04-20T12:30:00Z"],
-  "repos": ["project-one", "project-two"]
-}
-```
-
-Failure/current fallback response:
-
-```json
-{
-  "total_commits": 0,
-  "total_pull_requests": 0,
-  "total_repos": 0,
-  "total_languages": 0,
-  "languages": [],
-  "language_stats": {},
-  "commit_timestamps": [],
-  "repos": []
-}
-```
-
-Recommended improvements:
-
-- Return explicit `fetch_status`.
-- Handle invalid username with 404.
-- Add API caching.
-- Add pagination for more than 100 repositories.
-- Add rate-limit details.
-
-Recommended future response addition:
-
-```json
-{
+  "repos": ["project-one", "project-two"],
+  "total_commits_capped": false,
   "fetch_status": "success",
-  "fetched_at": "2026-04-29T10:30:00Z"
+  "fetched_at": "2026-04-29T10:30:00+00:00"
 }
 ```
+
+Status-mapped responses:
+
+- HTTP 404 + `fetch_status: "not_found"` if GitHub says the user does not exist.
+- HTTP 503 + `fetch_status: "rate_limited"` or `"timeout"` for upstream issues.
+- HTTP 200 with `fetch_status: "error"` for unexpected failures (body still
+  carries zeros so the UI can render the failure distinctly from "no data").
 
 ## 7.2 LeetCode Tracking API
 
@@ -297,6 +293,16 @@ Current backend behavior:
 - Falls back to `leetcode-stats-api.herokuapp.com`.
 - Returns solved problem counts and ranking.
 
+Backend behavior (current):
+
+- One GraphQL query fetches submission stats, contest ranking, and the last
+  20 accepted submissions in a single round-trip.
+- `recent_submissions` carries `{title, timestamp, lang}` per item — the
+  `timestamp` (unix seconds) is what the `problem_solving_velocity` feature
+  uses, so this field is no longer empty for real users.
+- If GraphQL fails, falls back to the public Heroku stats endpoint for solved
+  counts only, and reports `fetch_status` accordingly.
+
 Success response:
 
 ```json
@@ -307,30 +313,14 @@ Success response:
   "hard": 15,
   "ranking": 45000,
   "total_languages": 4,
-  "recent_submissions": []
+  "contest_rating": 1623,
+  "recent_submissions": [
+    {"title": "Two Sum", "timestamp": 1717000000, "lang": "python3"}
+  ],
+  "fetch_status": "success",
+  "fetched_at": "2026-04-29T10:30:00+00:00"
 }
 ```
-
-Failure/current fallback response:
-
-```json
-{
-  "solved": 0,
-  "easy": 0,
-  "medium": 0,
-  "hard": 0,
-  "ranking": 0,
-  "total_languages": 0,
-  "recent_submissions": []
-}
-```
-
-Recommended improvements:
-
-- Return `fetch_status`.
-- Avoid silently converting API failure to zeros.
-- Add contest rating if available.
-- Add recent submissions if available.
 
 ## 7.3 Codeforces Tracking API
 
@@ -354,6 +344,16 @@ Current backend behavior:
 - Calls `user.rating`.
 - Returns rating, rank, contests, and latest contest history.
 
+Backend behavior (current):
+
+- `user.info` populates rating/rank.
+- `user.rating` populates contest history.
+- `user.status?from=1&count=200` fetches recent submissions; the average of
+  the last 50 accepted-submission `problem.rating` values feeds the
+  `codeforces_avg_problem_rating` ML feature.
+- Codeforces returns 200 with `status:"FAILED"` for unknown handles — this
+  is mapped to `fetch_status: "not_found"` and HTTP 404.
+
 Success response:
 
 ```json
@@ -364,33 +364,16 @@ Success response:
   "max_rank": "specialist",
   "contests": 12,
   "contest_history": [
-    {
-      "name": "Codeforces Round 1000",
-      "rating": 1320,
-      "rank": 4321
-    }
-  ]
+    {"name": "Codeforces Round 1000", "rating": 1320, "rank": 4321}
+  ],
+  "recent_submissions": [
+    {"timestamp": 1716000000, "verdict": "OK", "problem_rating": 1500}
+  ],
+  "avg_problem_rating": 1387.4,
+  "fetch_status": "success",
+  "fetched_at": "2026-04-29T10:30:00+00:00"
 }
 ```
-
-Failure/current fallback response:
-
-```json
-{
-  "rating": 0,
-  "max_rating": 0,
-  "rank": "unrated",
-  "max_rank": "unrated",
-  "contests": 0,
-  "contest_history": []
-}
-```
-
-Recommended improvements:
-
-- Return 404 for invalid handle.
-- Add explicit status.
-- Add submission/activity features in a separate endpoint or snapshot process.
 
 ## 7.4 Combined Profile API
 
@@ -529,6 +512,9 @@ Success response:
 
 ```json
 {
+  "analysis_id": "8b3f2a17b3924c1d9d0a87f6e5d7c2a1",
+  "model_version": "ats-v1.1.0",
+  "feature_version": "features-v1.1.0",
   "score": 72.5,
   "shap_values": {
     "GitHub Commits": 0.12,
@@ -550,8 +536,8 @@ Success response:
     "gaps": [
       {
         "skill": "Resume Keywords",
-        "advice": "Your resume is missing critical keywords from the job description.",
-        "action": "Review the job description and incorporate relevant technical keywords into your resume.",
+        "advice": "Your resume is missing keywords required by this job: docker, sql.",
+        "action": "Update your resume to demonstrate docker, sql — add a project, certification, or bullet point that uses each one.",
         "topic": null,
         "shap_impact": 0.08,
         "feature_label": "Skill-Keyword Match",
@@ -561,79 +547,57 @@ Success response:
     ],
     "total_gaps": 1
   },
+  "platform_status": {
+    "github": "success",
+    "leetcode": "not_requested",
+    "codeforces": "rate_limited"
+  },
   "platform_data": {
     "github": {
       "total_commits": 120,
       "total_repos": 12,
-      "languages": ["Python", "JavaScript"]
+      "languages": ["Python", "JavaScript"],
+      "fetch_status": "success"
     },
     "leetcode": {
-      "solved": 150,
-      "ranking": 45000
+      "solved": 0,
+      "ranking": 0,
+      "fetch_status": "not_requested"
     },
     "codeforces": {
-      "rating": 1300
+      "rating": 0,
+      "avg_problem_rating": 0,
+      "fetch_status": "rate_limited"
     }
   }
 }
 ```
 
-Current error responses:
+Notes on the response:
 
-Model not loaded:
+- `score` is a **calibrated** probability of class `Match` * 100. Calibration
+  is fit via `CalibratedClassifierCV(method='isotonic', cv=5)` so the number
+  is interpretable as "the model's estimated match probability".
+- `shap_values` are computed on the **same** raw feature vector the
+  underlying XGBoost saw — no scaling mismatch. Each value is the marginal
+  contribution of that feature to the tree's log-odds output.
+- `recommendations.gaps` for `Skill-Keyword Match` cites the actual top-3
+  missing keywords from the JD. Per-keyword gaps only get a `roadmap_url`
+  when the corresponding `roadmap-content/<slug>.json` actually exists.
+- `platform_status` distinguishes `not_requested` (user did not provide a
+  username) from `rate_limited`, `not_found`, `error`, etc. The frontend
+  uses this to render explicit reasons instead of silent zeros.
 
-```json
-{
-  "error": "ML model not loaded. Please train the model first."
-}
-```
-
-No resume:
-
-```json
-{
-  "error": "No resume file provided."
-}
-```
-
-No file selected:
+Error responses (structured, one shape):
 
 ```json
-{
-  "error": "No file selected."
-}
-```
-
-Empty job description:
-
-```json
-{
-  "error": "Job description cannot be empty."
-}
-```
-
-Unsupported file format:
-
-```json
-{
-  "error": "Unsupported file format. Please upload a PDF or DOCX."
-}
-```
-
-Resume parse failure:
-
-```json
-{
-  "error": "Could not extract text from resume."
-}
-```
-
-Unhandled failure:
-
-```json
-{
-  "error": "Analysis failed: <details>"
-}
+{ "error": { "code": "MODEL_NOT_LOADED", "message": "ML model not loaded...", "details": {} } }
+{ "error": { "code": "RESUME_REQUIRED", "message": "No resume file provided.", "details": {} } }
+{ "error": { "code": "RESUME_FILE_EMPTY", "message": "No file selected.", "details": {} } }
+{ "error": { "code": "JOB_DESCRIPTION_REQUIRED", "message": "Job description cannot be empty.", "details": {} } }
+{ "error": { "code": "RESUME_FORMAT_UNSUPPORTED", "message": "Unsupported file format. Please upload a PDF or DOCX.", "details": {} } }
+{ "error": { "code": "RESUME_PARSE_FAILED", "message": "Could not extract readable text from this resume.", "details": {} } }
+{ "error": { "code": "ATS_ANALYSIS_FAILED", "message": "Analysis failed: ...", "details": {"analysis_id": "..."} } }
 ```
 
 Recommended frontend behavior:
@@ -686,14 +650,24 @@ Response:
 {
   "status": "ok",
   "model_loaded": true,
-  "version": "0.1.0"
+  "model_version": "ats-v1.1.0",
+  "feature_version": "features-v1.1.0",
+  "dataset_version": "synthetic-bootstrap-v1",
+  "feature_count": 29,
+  "trained_at": "2026-04-29T10:30:00+00:00"
 }
 ```
 
+`model_version`, `feature_version`, `dataset_version`, and `trained_at`
+come from `backend/ml/model_meta.json`, which is written by
+`python -m ml.train_model` alongside `model.joblib`. If the model is not
+loaded these fields are `null`.
+
 Purpose:
 
-- Frontend can check backend availability.
+- Frontend can check backend availability and model readiness.
 - Deployment platform can check service health.
+- Auditors / users can confirm which model + feature set produced a result.
 
 ### 8.2 Roadmap List
 

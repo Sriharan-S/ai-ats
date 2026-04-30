@@ -1,22 +1,31 @@
 """
 ML Pipeline for AI-Powered Student Profile Tracker.
 
-Implements the ensemble learning strategy from the paper:
-  - XGBoost (gradient boosting)
-  - Random Forest (bagging)
-  - VotingClassifier (soft voting)
-  - SHAP TreeExplainer for interpretability
+The score is a continuous regression target in [0, 100] — interpreted as
+"how well this resume + profile evidence matches the job description". This
+is closer to what users expect of an ATS score than the previous calibrated
+P(Match) formulation, and it produces sensible values even when the user
+provides a resume + JD only (no GitHub / LeetCode / Codeforces handles).
+
+Stack:
+  - XGBRegressor + RandomForestRegressor combined via VotingRegressor.
+  - SHAP TreeExplainer attached to the XGBoost regressor (faithful — both
+    the regressor and the SHAP estimator see the same raw feature matrix,
+    no scaling).
 """
 
-import numpy as np
-import pandas as pd
-import joblib
+from __future__ import annotations
+
+import json
 import os
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import StratifiedKFold, cross_val_score
-from xgboost import XGBClassifier
+from datetime import datetime, timezone
+
+import joblib
+import numpy as np
 import shap
+from sklearn.ensemble import RandomForestRegressor, VotingRegressor
+from sklearn.model_selection import KFold, cross_val_score
+from xgboost import XGBRegressor
 
 # Feature names used by the model (must match feature_engineering.build_feature_vector keys)
 FEATURE_NAMES = [
@@ -32,6 +41,7 @@ FEATURE_NAMES = [
     'codeforces_rating',
     'codeforces_max_rating',
     'codeforces_contests',
+    'codeforces_avg_problem_rating',
     'commit_consistency_score',
     'problem_solving_velocity',
     'skill_keyword_density',
@@ -42,9 +52,14 @@ FEATURE_NAMES = [
     'resume_word_count',
     'resume_skills_count',
     'jd_skills_count',
+    'has_github_profile',
+    'has_leetcode_profile',
+    'has_codeforces_profile',
+    'github_fetch_failed',
+    'leetcode_fetch_failed',
+    'codeforces_fetch_failed',
 ]
 
-# Human-readable labels for SHAP explanations
 FEATURE_LABELS = {
     'github_total_commits': 'GitHub Commits',
     'github_total_prs': 'GitHub Pull Requests',
@@ -58,6 +73,7 @@ FEATURE_LABELS = {
     'codeforces_rating': 'Codeforces Rating',
     'codeforces_max_rating': 'Codeforces Max Rating',
     'codeforces_contests': 'Codeforces Contests',
+    'codeforces_avg_problem_rating': 'Codeforces Avg Problem Rating',
     'commit_consistency_score': 'Commit Consistency',
     'problem_solving_velocity': 'Problem-Solving Velocity',
     'skill_keyword_density': 'Skill-Keyword Match',
@@ -68,118 +84,96 @@ FEATURE_LABELS = {
     'resume_word_count': 'Resume Length',
     'resume_skills_count': 'Resume Skills Count',
     'jd_skills_count': 'Job Description Skills Count',
+    'has_github_profile': 'GitHub Profile Present',
+    'has_leetcode_profile': 'LeetCode Profile Present',
+    'has_codeforces_profile': 'Codeforces Profile Present',
+    'github_fetch_failed': 'GitHub Fetch Failed',
+    'leetcode_fetch_failed': 'LeetCode Fetch Failed',
+    'codeforces_fetch_failed': 'Codeforces Fetch Failed',
 }
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'model.joblib')
-SCALER_PATH = os.path.join(os.path.dirname(__file__), 'scaler.joblib')
+META_PATH = os.path.join(os.path.dirname(__file__), 'model_meta.json')
+
+
+def _xgb_regressor() -> XGBRegressor:
+    return XGBRegressor(
+        n_estimators=200,
+        max_depth=5,
+        learning_rate=0.08,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42,
+        objective='reg:squarederror',
+    )
+
+
+def _rf_regressor() -> RandomForestRegressor:
+    return RandomForestRegressor(
+        n_estimators=200,
+        max_depth=10,
+        min_samples_split=4,
+        min_samples_leaf=2,
+        random_state=42,
+        n_jobs=-1,
+    )
 
 
 class ATSPipeline:
-    """
-    End-to-end ATS ML pipeline:
-      1. StandardScaler for numerical features
-      2. XGBoost + Random Forest → VotingClassifier (soft voting)
-      3. SHAP TreeExplainer for interpretability
+    """End-to-end ATS regression pipeline.
+
+    `predict_score(features)` returns the model's predicted match score in
+    [0, 100]. `explain(features)` adds a SHAP breakdown drawn from the
+    underlying XGBoost regressor.
     """
 
     def __init__(self):
-        self.scaler = StandardScaler()
-        self.model = None
+        self.model: VotingRegressor | None = None
+        self.shap_model: XGBRegressor | None = None
         self.explainer = None
         self._build_model()
 
     def _build_model(self):
-        """Build the ensemble Voting Classifier."""
-        xgb = XGBClassifier(
-            n_estimators=100,
-            max_depth=5,
-            learning_rate=0.1,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=42,
-            use_label_encoder=False,
-            eval_metric='logloss',
-        )
-
-        rf = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=8,
-            min_samples_split=5,
-            min_samples_leaf=2,
-            random_state=42,
-            n_jobs=-1,
-        )
-
-        self.model = VotingClassifier(
-            estimators=[('xgb', xgb), ('rf', rf)],
-            voting='soft',
-        )
+        xgb = _xgb_regressor()
+        rf = _rf_regressor()
+        self.model = VotingRegressor(estimators=[('xgb', xgb), ('rf', rf)])
 
     def train(self, X: np.ndarray, y: np.ndarray):
-        """Train the pipeline on data."""
-        # Scale features
-        X_scaled = self.scaler.fit_transform(X)
+        self.model.fit(X, y)
 
-        # Train voting classifier
-        self.model.fit(X_scaled, y)
-
-        # Build SHAP explainer on one of the base models (XGBoost)
-        xgb_model = self.model.named_estimators_['xgb']
-        self.explainer = shap.TreeExplainer(xgb_model)
+        # Standalone XGB on the same data, used for SHAP. Same hyperparams as
+        # the one inside the voting regressor — SHAP additivity holds for
+        # this estimator.
+        self.shap_model = _xgb_regressor()
+        self.shap_model.fit(X, y)
+        self.explainer = shap.TreeExplainer(self.shap_model)
 
     def predict_score(self, features_dict: dict) -> float:
-        """
-        Predict the Job Match Score (probability of class 1 = Match).
-        Returns a score between 0 and 100.
-        """
         X = self._dict_to_array(features_dict)
-        X_scaled = self.scaler.transform(X)
-        proba = self.model.predict_proba(X_scaled)
-        return float(proba[0][1] * 100)  # Probability of being a "Match"
+        prediction = float(self.model.predict(X)[0])
+        return float(np.clip(prediction, 0.0, 100.0))
 
     def explain(self, features_dict: dict) -> dict:
-        """
-        Generate SHAP-based explanation for a prediction.
-        Returns:
-          - score: Job Match Score (0-100)
-          - shap_values: dict of feature_label -> shap_value
-          - top_positive: list of (label, value) - features pushing score UP
-          - top_negative: list of (label, value) - features pushing score DOWN
-          - base_value: expected value from SHAP
-        """
         X = self._dict_to_array(features_dict)
-        X_scaled = self.scaler.transform(X)
-
         score = self.predict_score(features_dict)
 
-        # Get SHAP values
-        xgb_model = self.model.named_estimators_['xgb']
-
-        # Use unscaled data for SHAP on tree models for better interpretability
         shap_values = self.explainer.shap_values(X)
+        sv = np.asarray(shap_values).flatten()
 
-        if isinstance(shap_values, list):
-            sv = shap_values[1] if len(shap_values) > 1 else shap_values[0]
-        else:
-            sv = shap_values
-
-        sv = sv.flatten()
-
-        # Map to readable labels
         shap_dict = {}
         for i, fname in enumerate(FEATURE_NAMES):
             label = FEATURE_LABELS.get(fname, fname)
             shap_dict[label] = float(sv[i])
 
-        # Sort by absolute impact
         sorted_features = sorted(shap_dict.items(), key=lambda x: abs(x[1]), reverse=True)
-
         top_positive = [(k, v) for k, v in sorted_features if v > 0][:6]
         top_negative = [(k, v) for k, v in sorted_features if v < 0][:6]
 
-        base_value = float(self.explainer.expected_value)
-        if isinstance(self.explainer.expected_value, np.ndarray):
-            base_value = float(self.explainer.expected_value[1]) if len(self.explainer.expected_value) > 1 else float(self.explainer.expected_value[0])
+        base_value = self.explainer.expected_value
+        if isinstance(base_value, np.ndarray):
+            base_value = float(base_value.flatten()[0])
+        else:
+            base_value = float(base_value)
 
         return {
             'score': round(score, 1),
@@ -191,45 +185,104 @@ class ATSPipeline:
         }
 
     def _dict_to_array(self, features_dict: dict) -> np.ndarray:
-        """Convert feature dict to numpy array in correct order."""
         values = [features_dict.get(name, 0) for name in FEATURE_NAMES]
         return np.array([values], dtype=np.float64)
 
-    def save(self, model_path=None, scaler_path=None):
-        """Save model and scaler to disk."""
-        joblib.dump(self.model, model_path or MODEL_PATH)
-        joblib.dump(self.scaler, scaler_path or SCALER_PATH)
+    def save(self, model_path: str | None = None):
+        joblib.dump(
+            {
+                'voting_model': self.model,
+                'shap_model': self.shap_model,
+                'feature_names': FEATURE_NAMES,
+                'task': 'regression',
+            },
+            model_path or MODEL_PATH,
+        )
 
-    def load(self, model_path=None, scaler_path=None):
-        """Load model and scaler from disk."""
-        self.model = joblib.load(model_path or MODEL_PATH)
-        self.scaler = joblib.load(scaler_path or SCALER_PATH)
-        # Rebuild SHAP explainer
-        xgb_model = self.model.named_estimators_['xgb']
-        self.explainer = shap.TreeExplainer(xgb_model)
+    def load(self, model_path: str | None = None):
+        bundle = joblib.load(model_path or MODEL_PATH)
+        if not isinstance(bundle, dict):
+            raise RuntimeError(
+                "Loaded model is in legacy format. Retrain with "
+                "`python -m ml.train_model`."
+            )
+
+        # New regression bundle
+        if 'voting_model' in bundle:
+            self.model = bundle['voting_model']
+            self.shap_model = bundle.get('shap_model')
+        # Legacy classification bundle — fail loud.
+        elif 'calibrated_model' in bundle:
+            raise RuntimeError(
+                "Loaded model bundle was trained with the legacy classifier. "
+                "Retrain with `python -m ml.train_model` to upgrade to the "
+                "regression scorer."
+            )
+        else:
+            raise RuntimeError("Unknown model bundle layout.")
+
+        if self.shap_model is None:
+            raise RuntimeError(
+                "Loaded model bundle is missing the SHAP estimator. "
+                "Retrain with `python -m ml.train_model`."
+            )
+        self.explainer = shap.TreeExplainer(self.shap_model)
 
 
 def load_pipeline() -> ATSPipeline:
-    """Load a pre-trained pipeline from disk."""
     pipeline = ATSPipeline()
     pipeline.load()
     return pipeline
 
 
-def evaluate_pipeline(pipeline: ATSPipeline, X: np.ndarray, y: np.ndarray) -> dict:
-    """Evaluate the pipeline using 5-fold stratified cross-validation."""
-    X_scaled = pipeline.scaler.transform(X)
+def evaluate_pipeline(X: np.ndarray, y: np.ndarray) -> dict:
+    """5-fold CV regression metrics."""
+    model = VotingRegressor(estimators=[('xgb', _xgb_regressor()), ('rf', _rf_regressor())])
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    accuracy = cross_val_score(pipeline.model, X_scaled, y, cv=skf, scoring='accuracy')
-    f1 = cross_val_score(pipeline.model, X_scaled, y, cv=skf, scoring='f1_weighted')
-    precision = cross_val_score(pipeline.model, X_scaled, y, cv=skf, scoring='precision_weighted')
-    recall = cross_val_score(pipeline.model, X_scaled, y, cv=skf, scoring='recall_weighted')
+    r2 = cross_val_score(model, X, y, cv=kf, scoring='r2')
+    mae = cross_val_score(model, X, y, cv=kf, scoring='neg_mean_absolute_error')
+    rmse = cross_val_score(model, X, y, cv=kf, scoring='neg_root_mean_squared_error')
 
     return {
-        'accuracy': float(np.mean(accuracy)),
-        'f1_weighted': float(np.mean(f1)),
-        'precision': float(np.mean(precision)),
-        'recall': float(np.mean(recall)),
+        'r2': float(np.mean(r2)),
+        'mae': float(-np.mean(mae)),
+        'rmse': float(-np.mean(rmse)),
     }
+
+
+def write_meta(
+    *,
+    model_version: str,
+    feature_version: str,
+    dataset_version: str,
+    sample_size: int,
+    target_summary: dict,
+    metrics: dict,
+    meta_path: str | None = None,
+) -> None:
+    meta = {
+        'model_version': model_version,
+        'feature_version': feature_version,
+        'dataset_version': dataset_version,
+        'task': 'regression',
+        'feature_count': len(FEATURE_NAMES),
+        'feature_names': FEATURE_NAMES,
+        'sample_size': sample_size,
+        'target_summary': target_summary,
+        'cv_metrics': metrics,
+        'trained_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+    }
+    with open(meta_path or META_PATH, 'w', encoding='utf-8') as f:
+        json.dump(meta, f, indent=2)
+
+
+def read_meta(meta_path: str | None = None) -> dict:
+    path = meta_path or META_PATH
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}

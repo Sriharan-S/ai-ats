@@ -2,7 +2,7 @@ import * as React from "react";
 import { useState, useRef, FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { requestJson } from "../api/client";
-import { AtsAnalysisResponse } from "../api/types";
+import { AtsAnalysisResponse, FetchStatus } from "../api/types";
 import { Button } from "../components/common/Button";
 import { TextInput } from "../components/common/TextInput";
 import { TextArea } from "../components/common/TextArea";
@@ -78,6 +78,27 @@ export default function AtsPage() {
     if (score >= 60) return "#6366f1"; // Indigo 500
     if (score >= 40) return "#f59e0b"; // Amber 500
     return "#f43f5e"; // Rose 500
+  };
+
+  const platformStatusLabel = (status: FetchStatus | undefined): string => {
+    switch (status) {
+      case "success":
+        return "Fetched";
+      case "not_requested":
+        return "Not provided";
+      case "not_found":
+        return "User not found";
+      case "rate_limited":
+        return "Unavailable: rate limit";
+      case "timeout":
+        return "Unavailable: upstream timeout";
+      case "unauthorized":
+        return "Unavailable: auth required";
+      case "error":
+        return "Unavailable: upstream error";
+      default:
+        return "Not provided";
+    }
   };
 
   return (
@@ -183,9 +204,14 @@ export default function AtsPage() {
               </div>
               <div className="p-8 md:w-2/3 flex flex-col justify-center">
                 <h3 className="text-lg font-bold mb-2">Executive Summary</h3>
-                <p className="text-slate-600 dark:text-slate-400 mb-6 leading-relaxed">
+                <p className="text-slate-600 dark:text-slate-400 mb-2 leading-relaxed">
                   {result.recommendations.summary}
                 </p>
+                {result.model_version && (
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mb-6">
+                    Model {result.model_version} · Features {result.feature_version} · Analysis {result.analysis_id?.slice(0, 8)}
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2 mb-6">
                   {result.missing_keywords.slice(0, 5).map(kw => (
                     <span key={kw} className="px-2.5 py-1 bg-rose-50 text-rose-700 text-xs font-semibold rounded border border-rose-100">
@@ -335,15 +361,14 @@ export default function AtsPage() {
                     <CardTitle className="flex items-center gap-2"><Activity size={18}/> GitHub Data</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm">
-                    {result.platform_data.github.total_commits ? (
+                    <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Status</span><span className="font-medium">{platformStatusLabel(result.platform_data.github.fetch_status)}</span></div>
+                    {result.platform_data.github.fetch_status === 'success' ? (
                       <>
                         <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Commits</span><span className="font-bold">{result.platform_data.github.total_commits}</span></div>
                         <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Repos</span><span className="font-bold">{result.platform_data.github.total_repos}</span></div>
-                        <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Languages</span><span className="font-bold text-right">{result.platform_data.github.languages.slice(0,3).join(', ')}</span></div>
+                        <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Languages</span><span className="font-bold text-right">{result.platform_data.github.languages.slice(0,3).join(', ') || '—'}</span></div>
                       </>
-                    ) : (
-                      <p className="text-slate-500 dark:text-slate-400 italic">No data provided or fetched.</p>
-                    )}
+                    ) : null}
                   </CardContent>
                 </Card>
 
@@ -352,14 +377,13 @@ export default function AtsPage() {
                     <CardTitle className="flex items-center gap-2"><Target size={18}/> LeetCode Data</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm">
-                    {result.platform_data.leetcode.solved ? (
+                    <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Status</span><span className="font-medium">{platformStatusLabel(result.platform_data.leetcode.fetch_status)}</span></div>
+                    {result.platform_data.leetcode.fetch_status === 'success' ? (
                       <>
                         <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Solved</span><span className="font-bold">{result.platform_data.leetcode.solved}</span></div>
                         <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Ranking</span><span className="font-bold">{result.platform_data.leetcode.ranking.toLocaleString()}</span></div>
                       </>
-                    ) : (
-                      <p className="text-slate-500 dark:text-slate-400 italic">No data provided or fetched.</p>
-                    )}
+                    ) : null}
                   </CardContent>
                 </Card>
 
@@ -368,13 +392,15 @@ export default function AtsPage() {
                     <CardTitle className="flex items-center gap-2"><Target size={18}/> Codeforces Data</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm">
-                    {result.platform_data.codeforces.rating ? (
+                    <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Status</span><span className="font-medium">{platformStatusLabel(result.platform_data.codeforces.fetch_status)}</span></div>
+                    {result.platform_data.codeforces.fetch_status === 'success' ? (
                       <>
                         <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Rating</span><span className="font-bold">{result.platform_data.codeforces.rating}</span></div>
+                        {result.platform_data.codeforces.avg_problem_rating > 0 && (
+                          <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Avg Problem Rating</span><span className="font-bold">{result.platform_data.codeforces.avg_problem_rating}</span></div>
+                        )}
                       </>
-                    ) : (
-                      <p className="text-slate-500 dark:text-slate-400 italic">No data provided or fetched.</p>
-                    )}
+                    ) : null}
                   </CardContent>
                 </Card>
               </div>

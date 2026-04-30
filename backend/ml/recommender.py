@@ -178,89 +178,131 @@ KEYWORD_TOPIC_MAP = {
 }
 
 
-def identify_skill_gaps(shap_explanation: dict) -> list:
-    """
-    Identify skill gaps from SHAP explanation.
+def _format_keyword_list(keywords: list, *, limit: int = 3) -> str:
+    cleaned = [k.strip() for k in keywords if isinstance(k, str) and k.strip()]
+    if not cleaned:
+        return ""
+    snippet = cleaned[:limit]
+    if len(cleaned) > limit:
+        return ", ".join(snippet) + f", and {len(cleaned) - limit} more"
+    if len(snippet) == 1:
+        return snippet[0]
+    return ", ".join(snippet[:-1]) + f", and {snippet[-1]}"
 
-    Args:
-        shap_explanation: dict with 'top_negative' from pipeline.explain()
 
-    Returns:
-        List of gap dicts with skill, advice, action, topic, shap_impact
+def identify_skill_gaps(shap_explanation: dict, missing_keywords: list | None = None) -> list:
+    """Identify skill gaps from SHAP explanation.
+
+    When the negative-impact feature is `Skill-Keyword Match` and we know
+    which keywords are actually missing, we cite them by name in the advice
+    so the user sees a concrete reason instead of boilerplate.
     """
     gaps = []
-
+    missing_keywords = missing_keywords or []
     top_negative = shap_explanation.get('top_negative', [])
 
     for label, shap_value in top_negative:
         gap_info = SKILL_GAP_MAP.get(label)
-        if gap_info:
-            gaps.append({
-                'skill': gap_info['skill'],
-                'advice': gap_info['advice'],
-                'action': gap_info['action'],
-                'topic': gap_info['topic'],
-                'shap_impact': abs(shap_value),
-                'feature_label': label,
-            })
+        if not gap_info:
+            continue
 
-    # Sort by SHAP impact (most impactful gap first)
+        advice = gap_info['advice']
+        action = gap_info['action']
+
+        if label == 'Skill-Keyword Match' and missing_keywords:
+            joined = _format_keyword_list(missing_keywords, limit=3)
+            advice = (
+                f"Your resume is missing keywords required by this job: {joined}."
+            )
+            action = (
+                f"Update your resume to demonstrate {joined} — add a project, "
+                f"certification, or bullet point that uses each one."
+            )
+        elif label == 'Skill Validation (Resume vs GitHub)' and missing_keywords:
+            joined = _format_keyword_list(missing_keywords, limit=2)
+            action = (
+                f"Build a public GitHub project that uses {joined} so the "
+                f"resume claims are backed by code recruiters can read."
+            )
+
+        gaps.append({
+            'skill': gap_info['skill'],
+            'advice': advice,
+            'action': action,
+            'topic': gap_info['topic'],
+            'shap_impact': abs(shap_value),
+            'feature_label': label,
+        })
+
     gaps.sort(key=lambda g: g['shap_impact'], reverse=True)
-
     return gaps
 
 
-def identify_keyword_gaps(missing_keywords: list) -> list:
-    """
-    Map missing JD keywords to learning roadmap topics.
-
-    Args:
-        missing_keywords: list of keyword strings missing from resume
-
-    Returns:
-        List of gap dicts with skill, topic, and action
-    """
-    gaps = []
-
-    for keyword in missing_keywords:
-        kw_lower = keyword.lower().strip()
-        topic = KEYWORD_TOPIC_MAP.get(kw_lower)
-
-        if topic:
-            gaps.append({
-                'skill': keyword,
-                'topic': topic,
-                'advice': f'The keyword "{keyword}" is required by this job but missing from your profile.',
-                'action': f'Learn {keyword} and add relevant projects to your portfolio.',
-                'shap_impact': 0,
-                'feature_label': f'Missing: {keyword}',
-            })
-
-    return gaps
-
-
-def map_gaps_to_roadmaps(gaps: list, roadmap_dir: str = None) -> list:
-    """
-    Enrich gap information with links to existing learning roadmaps.
-
-    Args:
-        gaps: list of gap dicts from identify_skill_gaps()
-        roadmap_dir: path to roadmap-content directory
-
-    Returns:
-        Enriched gaps with 'roadmap_available' and 'roadmap_url' fields
-    """
+def _available_roadmap_slugs(roadmap_dir: str | None = None) -> set:
     if roadmap_dir is None:
         roadmap_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'roadmap-content'
         )
+    if not os.path.exists(roadmap_dir):
+        return set()
+    return {
+        f[:-5] for f in os.listdir(roadmap_dir)
+        if f.endswith('.json')
+    }
 
-    available_roadmaps = set()
-    if os.path.exists(roadmap_dir):
-        for f in os.listdir(roadmap_dir):
-            if f.endswith('.json'):
-                available_roadmaps.add(f.replace('.json', ''))
+
+def identify_keyword_gaps(missing_keywords: list, roadmap_dir: str | None = None) -> list:
+    """Map missing JD keywords to learning roadmap topics.
+
+    A keyword is only emitted as a separate gap if it maps to a roadmap that
+    actually exists on disk — otherwise we'd be promising the user a link
+    that 404s. If no roadmap exists we still emit the gap so the user knows
+    the keyword is required, but with a generic next step.
+    """
+    gaps = []
+    available = _available_roadmap_slugs(roadmap_dir)
+
+    for keyword in missing_keywords:
+        kw_lower = keyword.lower().strip()
+        topic = KEYWORD_TOPIC_MAP.get(kw_lower)
+        roadmap_exists = bool(topic and topic in available)
+
+        if topic and roadmap_exists:
+            advice = (
+                f'"{keyword}" is required by this job but missing from your '
+                f'resume.'
+            )
+            action = (
+                f'Open the {topic.replace("-", " ")} roadmap below and start '
+                f'with the {keyword} fundamentals; then add a small project '
+                f'using {keyword} to your GitHub.'
+            )
+        else:
+            advice = (
+                f'"{keyword}" appears in the job description but not on your '
+                f'resume. We do not have a curated roadmap for it yet.'
+            )
+            action = (
+                f'Search the official documentation or MDN for {keyword}, '
+                f'then ship one project that uses it.'
+            )
+
+        gaps.append({
+            'skill': keyword,
+            'topic': topic if roadmap_exists else None,
+            'advice': advice,
+            'action': action,
+            'shap_impact': 0,
+            'feature_label': f'Missing: {keyword}',
+        })
+
+    return gaps
+
+
+def map_gaps_to_roadmaps(gaps: list, roadmap_dir: str | None = None) -> list:
+    """Enrich gap information with links to existing learning roadmaps."""
+    available_roadmaps = _available_roadmap_slugs(roadmap_dir)
 
     for gap in gaps:
         topic = gap.get('topic')
@@ -286,17 +328,27 @@ def generate_recommendations(shap_explanation: dict, missing_keywords: list = No
         dict with score, gaps (prioritized), and summary text
     """
     score = shap_explanation.get('score', 0)
+    missing_keywords = missing_keywords or []
 
-    # Get SHAP-based gaps
-    gaps = identify_skill_gaps(shap_explanation)
+    # SHAP-based gaps, with keyword-aware advice for the keyword-match feature.
+    gaps = identify_skill_gaps(shap_explanation, missing_keywords=missing_keywords)
 
-    # Get keyword-based gaps
+    # Per-keyword gaps mapped to existing roadmaps when possible.
     if missing_keywords:
         keyword_gaps = identify_keyword_gaps(missing_keywords)
         gaps.extend(keyword_gaps)
 
-    # Map to roadmaps
+    # Annotate each gap with a roadmap URL where one exists.
     gaps = map_gaps_to_roadmaps(gaps)
+
+    # Stable ordering: SHAP impact first; gaps that have a roadmap break ties
+    # so users see actionable items before generic ones.
+    gaps.sort(
+        key=lambda g: (
+            -float(g.get('shap_impact', 0) or 0),
+            0 if g.get('roadmap_available') else 1,
+        )
+    )
 
     # Generate summary
     if score >= 80:

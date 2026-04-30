@@ -1,6 +1,6 @@
 import { useState, FormEvent } from "react";
-import { requestJson } from "../api/client";
-import { GitHubProfile, LeetCodeProfile, CodeforcesProfile } from "../api/types";
+import { requestJsonAllowNonOk } from "../api/client";
+import { GitHubProfile, LeetCodeProfile, CodeforcesProfile, FetchStatus } from "../api/types";
 import { Button } from "../components/common/Button";
 import { TextInput } from "../components/common/TextInput";
 import { StatCard } from "../components/common/StatCard";
@@ -28,43 +28,68 @@ export default function TrackPage() {
       setErrors({ form: "Please enter at least one username" });
       return;
     }
-    
+
     setErrors({});
     setLoading(true);
     setHasSearched(true);
-    
+
     setGithubData(null);
     setLeetcodeData(null);
     setCodeforcesData(null);
 
-    const promises = [];
+    const promises: Promise<unknown>[] = [];
 
     if (githubUser) {
       promises.push(
-        requestJson<GitHubProfile>(`/api/track/github/${githubUser}`)
-          .then(setGithubData)
-          .catch(e => setErrors(prev => ({ ...prev, github: e.message })))
+        requestJsonAllowNonOk<GitHubProfile>(`/api/track/github/${encodeURIComponent(githubUser)}`)
+          .then(({ data }) => setGithubData(data))
+          .catch(err => setErrors(prev => ({ ...prev, github: err instanceof Error ? err.message : "Network error" })))
       );
     }
 
     if (leetcodeUser) {
       promises.push(
-        requestJson<LeetCodeProfile>(`/api/track/leetcode/${leetcodeUser}`)
-          .then(setLeetcodeData)
-          .catch(e => setErrors(prev => ({ ...prev, leetcode: e.message })))
+        requestJsonAllowNonOk<LeetCodeProfile>(`/api/track/leetcode/${encodeURIComponent(leetcodeUser)}`)
+          .then(({ data }) => setLeetcodeData(data))
+          .catch(err => setErrors(prev => ({ ...prev, leetcode: err instanceof Error ? err.message : "Network error" })))
       );
     }
 
     if (codeforcesUser) {
       promises.push(
-        requestJson<CodeforcesProfile>(`/api/track/codeforces/${codeforcesUser}`)
-          .then(setCodeforcesData)
-          .catch(e => setErrors(prev => ({ ...prev, codeforces: e.message })))
+        requestJsonAllowNonOk<CodeforcesProfile>(`/api/track/codeforces/${encodeURIComponent(codeforcesUser)}`)
+          .then(({ data }) => setCodeforcesData(data))
+          .catch(err => setErrors(prev => ({ ...prev, codeforces: err instanceof Error ? err.message : "Network error" })))
       );
     }
 
     await Promise.all(promises);
     setLoading(false);
+  };
+
+  const renderStatusBadge = (loading: boolean, status: FetchStatus | undefined, networkError: string | undefined) => {
+    if (loading) {
+      return <span className="text-sm text-slate-500 dark:text-slate-400 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded">Fetching...</span>;
+    }
+    if (networkError) {
+      return <span className="text-sm text-rose-700 bg-rose-50 px-2 py-1 rounded font-medium border border-rose-200 flex items-center gap-1"><AlertTriangle size={14}/> Network error</span>;
+    }
+    switch (status) {
+      case "success":
+        return <span className="text-sm text-emerald-700 bg-emerald-50 px-2 py-1 rounded font-medium border border-emerald-200">Connected</span>;
+      case "not_found":
+        return <span className="text-sm text-amber-700 bg-amber-50 px-2 py-1 rounded font-medium border border-amber-200">User not found</span>;
+      case "rate_limited":
+        return <span className="text-sm text-amber-700 bg-amber-50 px-2 py-1 rounded font-medium border border-amber-200">Rate limited — try later</span>;
+      case "unauthorized":
+        return <span className="text-sm text-rose-700 bg-rose-50 px-2 py-1 rounded font-medium border border-rose-200">Auth required</span>;
+      case "timeout":
+        return <span className="text-sm text-amber-700 bg-amber-50 px-2 py-1 rounded font-medium border border-amber-200">Upstream timeout</span>;
+      case "error":
+        return <span className="text-sm text-rose-700 bg-rose-50 px-2 py-1 rounded font-medium border border-rose-200 flex items-center gap-1"><AlertTriangle size={14}/> Upstream error</span>;
+      default:
+        return null;
+    }
   };
 
   const handleClear = () => {
@@ -145,13 +170,7 @@ export default function TrackPage() {
               <div className="flex items-center gap-3 mb-4">
                 <Github size={24} />
                 <h2 className="text-2xl font-bold">GitHub</h2>
-                {loading ? (
-                  <span className="text-sm text-slate-500 dark:text-slate-400 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded">Fetching...</span>
-                ) : githubData ? (
-                  <span className="text-sm text-emerald-700 bg-emerald-50 px-2 py-1 rounded font-medium border border-emerald-200">Connected</span>
-                ) : errors.github ? (
-                  <span className="text-sm text-rose-700 bg-rose-50 px-2 py-1 rounded font-medium border border-rose-200 flex items-center gap-1"><AlertTriangle size={14}/> Error</span>
-                ) : null}
+                {renderStatusBadge(loading, githubData?.fetch_status, errors.github)}
               </div>
 
               {errors.github && (
@@ -160,7 +179,7 @@ export default function TrackPage() {
                 </div>
               )}
 
-              {githubData && (
+              {githubData && githubData.fetch_status === "success" && (
                 <div className="grid md:grid-cols-4 gap-4 mb-6">
                   <StatCard label="Commits" value={githubData.total_commits} />
                   <StatCard label="Pull Requests" value={githubData.total_pull_requests} />
@@ -192,13 +211,7 @@ export default function TrackPage() {
               <div className="flex items-center gap-3 mb-4">
                 <Code size={24} />
                 <h2 className="text-2xl font-bold">LeetCode</h2>
-                {loading ? (
-                  <span className="text-sm text-slate-500 dark:text-slate-400 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded">Fetching...</span>
-                ) : leetcodeData ? (
-                  <span className="text-sm text-emerald-700 bg-emerald-50 px-2 py-1 rounded font-medium border border-emerald-200">Connected</span>
-                ) : errors.leetcode ? (
-                   <span className="text-sm text-rose-700 bg-rose-50 px-2 py-1 rounded font-medium border border-rose-200 flex items-center gap-1"><AlertTriangle size={14}/> Error</span>
-                ) : null}
+                {renderStatusBadge(loading, leetcodeData?.fetch_status, errors.leetcode)}
               </div>
 
               {errors.leetcode && (
@@ -207,7 +220,7 @@ export default function TrackPage() {
                 </div>
               )}
 
-              {leetcodeData && (
+              {leetcodeData && leetcodeData.fetch_status === "success" && (
                 <div className="grid md:grid-cols-4 gap-4 mb-6">
                   <div className="md:col-span-2 grid grid-cols-2 gap-4">
                     <StatCard label="Total Solved" value={leetcodeData.solved} />
@@ -256,13 +269,7 @@ export default function TrackPage() {
               <div className="flex items-center gap-3 mb-4">
                 <Terminal size={24} />
                 <h2 className="text-2xl font-bold">Codeforces</h2>
-                {loading ? (
-                  <span className="text-sm text-slate-500 dark:text-slate-400 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded">Fetching...</span>
-                ) : codeforcesData ? (
-                  <span className="text-sm text-emerald-700 bg-emerald-50 px-2 py-1 rounded font-medium border border-emerald-200">Connected</span>
-                ) : errors.codeforces ? (
-                   <span className="text-sm text-rose-700 bg-rose-50 px-2 py-1 rounded font-medium border border-rose-200 flex items-center gap-1"><AlertTriangle size={14}/> Error</span>
-                ) : null}
+                {renderStatusBadge(loading, codeforcesData?.fetch_status, errors.codeforces)}
               </div>
 
                {errors.codeforces && (
@@ -271,7 +278,7 @@ export default function TrackPage() {
                 </div>
               )}
 
-              {codeforcesData && (
+              {codeforcesData && codeforcesData.fetch_status === "success" && (
                 <div className="grid md:grid-cols-4 gap-4 mb-6">
                   <StatCard label="Current Rating" value={codeforcesData.rating} />
                   <StatCard label="Max Rating" value={codeforcesData.max_rating} />

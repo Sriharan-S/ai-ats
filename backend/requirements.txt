@@ -9,3 +9,5 @@ numpy
 joblib
 pdfplumber
 python-docx
+pytest
+pytest-mock

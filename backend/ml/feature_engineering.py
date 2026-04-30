@@ -247,18 +247,34 @@ def extract_skills_from_text(text: str) -> list:
     return found
 
 
+def _has_signal(data: dict, keys: list) -> int:
+    """Return 1 if any of the named numeric/list keys carry a non-zero signal."""
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, (int, float)) and value > 0:
+            return 1
+        if isinstance(value, (list, str)) and len(value) > 0:
+            return 1
+    return 0
+
+
 def build_feature_vector(
     resume_text: str,
     jd_text: str,
     github_data: dict,
     leetcode_data: dict,
-    codeforces_data: dict
+    codeforces_data: dict,
+    fetch_status: dict | None = None,
 ) -> dict:
     """
     Builds the complete feature vector for a student-job pair.
-    Returns a dict of feature_name -> value.
+
+    `fetch_status` is an optional dict {github, leetcode, codeforces -> str}
+    used to populate explicit missingness flags so the model can distinguish
+    "user has zero commits" from "we could not reach GitHub".
     """
     features = {}
+    fetch_status = fetch_status or {}
 
     # --- Raw Numerical Features ---
     features['github_total_commits'] = github_data.get('total_commits', 0)
@@ -275,6 +291,9 @@ def build_feature_vector(
     features['codeforces_rating'] = float(codeforces_data.get('rating', 0))
     features['codeforces_max_rating'] = float(codeforces_data.get('max_rating', 0))
     features['codeforces_contests'] = codeforces_data.get('contests', 0)
+    features['codeforces_avg_problem_rating'] = float(
+        codeforces_data.get('avg_problem_rating', 0) or 0
+    )
 
     # --- Engineered Features ---
     commit_timestamps = github_data.get('commit_timestamps', [])
@@ -309,5 +328,30 @@ def build_feature_vector(
     features['resume_skills_count'] = len(resume_skills)
     jd_skills = extract_skills_from_text(jd_text)
     features['jd_skills_count'] = len(jd_skills)
+
+    # --- Missingness flags ---
+    # has_*: user actually carries some signal on this platform.
+    features['has_github_profile'] = _has_signal(
+        github_data,
+        ['total_commits', 'total_repos', 'total_pull_requests', 'languages'],
+    )
+    features['has_leetcode_profile'] = _has_signal(
+        leetcode_data, ['solved', 'easy', 'medium', 'hard', 'ranking']
+    )
+    features['has_codeforces_profile'] = _has_signal(
+        codeforces_data, ['rating', 'contests', 'recent_submissions']
+    )
+
+    # *_fetch_failed: distinguish "no signal" from "we couldn't reach the API".
+    failure_states = {"timeout", "rate_limited", "unauthorized", "error"}
+    features['github_fetch_failed'] = (
+        1 if fetch_status.get('github') in failure_states else 0
+    )
+    features['leetcode_fetch_failed'] = (
+        1 if fetch_status.get('leetcode') in failure_states else 0
+    )
+    features['codeforces_fetch_failed'] = (
+        1 if fetch_status.get('codeforces') in failure_states else 0
+    )
 
     return features
