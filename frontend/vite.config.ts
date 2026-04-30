@@ -12,6 +12,7 @@ export default defineConfig(() => ({
   },
   server: {
     hmr: process.env.DISABLE_HMR !== 'true',
+    allowedHosts: ['ats.sriharan.me'],
     proxy: {
       '/api': 'http://localhost:5001',
     },
