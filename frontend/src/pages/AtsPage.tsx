@@ -7,6 +7,7 @@ import { Button } from "../components/common/Button";
 import { TextInput } from "../components/common/TextInput";
 import { TextArea } from "../components/common/TextArea";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/common/Card";
+import { AuroraBackground } from "../components/common/AuroraBackground";
 import { Upload, FileText, Briefcase, ChevronRight, CheckCircle2, TrendingUp, TrendingDown, Target, ExternalLink, ShieldAlert, Activity } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart as ReBarChart, Bar as ReBar, XAxis, YAxis, Tooltip } from "recharts";
 
@@ -102,11 +103,12 @@ export default function AtsPage() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">ATS Assessment</h1>
-        <p className="text-slate-500 dark:text-slate-400">Analyze your resume against a job description using Explainable AI.</p>
-      </div>
+    <AuroraBackground className="bg-transparent dark:bg-transparent">
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold mb-2 text-slate-900 dark:text-white">ATS Assessment</h1>
+          <p className="text-slate-600 dark:text-slate-300">Analyze your resume against a job description using Explainable AI.</p>
+        </div>
 
       {!result && !loading && (
         <Card className="shadow-sm border-slate-200 dark:border-slate-800">
@@ -409,6 +411,7 @@ export default function AtsPage() {
 
         </div>
       )}
-    </div>
+      </div>
+    </AuroraBackground>
   );
 }
