@@ -9,7 +9,15 @@
       "Bash(python -c ' *)",
       "Bash(netstat -ano)",
       "Read(//d/d/Folders/Sri/AIATS/**)",
-      "Read(//d/d/Folders/Sri/AIATS/frontend/**)"
+      "Read(//d/d/Folders/Sri/AIATS/frontend/**)",
+      "Bash(python -m pytest tests/ -x)",
+      "Bash(PORT=5050 HOST=127.0.0.1 python main.py)",
+      "Bash(curl -s http://127.0.0.1:5050/api/health)",
+      "Bash(curl -s -o /dev/null -w \"roadmaps: %{http_code}\\\\n\" http://127.0.0.1:5050/api/roadmaps)",
+      "Bash(kill %1)",
+      "Bash(wait)",
+      "Bash(PORT=5050 HOST=127.0.0.1 timeout 6 python main.py)",
+      "Bash(PORT=5050 HOST=127.0.0.1 python -u main.py)"
     ]
   }
 }

@@ -1,4 +1,6 @@
-Flask
+fastapi
+uvicorn[standard]
+python-multipart
 requests
 python-dotenv
 scikit-learn
@@ -11,3 +13,4 @@ pdfplumber
 python-docx
 pytest
 pytest-mock
+httpx
