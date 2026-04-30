@@ -73,10 +73,10 @@ export default function HomePage() {
   return (
     <div className="flex flex-col gap-16 pb-16">
       {/* Hero Section */}
-      <section 
+      <section
         ref={containerRef}
         onMouseMove={handleMouseMove}
-        className="relative w-full min-h-[85vh] flex flex-col items-center justify-center overflow-hidden bg-slate-50 dark:bg-slate-950 px-4 pt-16 pb-12 box-border"
+        className="relative w-full min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center overflow-hidden bg-slate-50 dark:bg-slate-950 px-4 pt-16 pb-12 box-border"
       >
         {/* Background Effects */}
         <div className="absolute inset-0 z-0 opacity-[0.03]">
